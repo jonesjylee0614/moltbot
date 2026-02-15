@@ -195,6 +195,11 @@ const entries: SubCliEntry[] = [
     name: "channels",
     description: "Channel management",
     register: async (program) => {
+      // Initialize plugins before registering channels CLI.
+      // The channels CLI (add/remove/capabilities) calls normalizeChannelId()
+      // which requires the plugin registry to be populated with channel plugins.
+      const { registerPluginCliCommands } = await import("../../plugins/cli.js");
+      registerPluginCliCommands(program, await loadConfig());
       const mod = await import("../channels-cli.js");
       mod.registerChannelsCli(program);
     },
