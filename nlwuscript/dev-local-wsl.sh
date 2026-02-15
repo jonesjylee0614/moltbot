@@ -114,6 +114,42 @@ ensure_pnpm_runtime() {
   pnpm -v >/dev/null 2>&1 || die "pnpm command exists but cannot execute"
 }
 
+ensure_java_for_android() {
+  # Android build (Gradle) needs JDK 22+ for --enable-native-access flag.
+  # Skip if JAVA_HOME is already set and JDK version >= 22.
+  if [[ -n "${JAVA_HOME:-}" ]] && "$JAVA_HOME/bin/java" -version 2>&1 | grep -q '"2[2-9]\.\|"[3-9][0-9]\.'; then
+    return 0
+  fi
+
+  # Common locations to search for JDK 22+
+  local jdk_candidates=(
+    "$HOME/jdk/jdk-22"*
+    "$HOME/jdk/jdk-23"*
+    "$HOME/jdk/jdk-24"*
+    "$HOME/jdk/jdk-25"*
+    /usr/lib/jvm/java-22-*
+    /usr/lib/jvm/java-23-*
+    /usr/lib/jvm/java-24-*
+    /usr/lib/jvm/java-25-*
+    "$HOME/.sdkman/candidates/java/"*22*
+    "$HOME/.sdkman/candidates/java/"*23*
+    "$HOME/.sdkman/candidates/java/"*24*
+    "$HOME/.sdkman/candidates/java/"*25*
+  )
+
+  for candidate in "${jdk_candidates[@]}"; do
+    if [[ -x "$candidate/bin/java" ]]; then
+      export JAVA_HOME="$candidate"
+      export PATH="$JAVA_HOME/bin:$PATH"
+      log "JAVA_HOME set to $JAVA_HOME ($(java -version 2>&1 | head -1))"
+      return 0
+    fi
+  done
+
+  # No suitable JDK found — only warn, don't fail (non-Android tasks don't need it)
+  return 1
+}
+
 bootstrap_openclaw_state() {
   local config_path="$HOME/.openclaw/openclaw.json"
   if [[ -f "$config_path" ]]; then
@@ -303,6 +339,21 @@ log "Repo root: $REPO_ROOT"
 command -v bash >/dev/null 2>&1 || die "bash not found"
 ensure_node_runtime
 ensure_pnpm_runtime
+# Only detect JAVA_HOME/ANDROID_HOME when exec command involves Android/Gradle
+# This avoids wasting ~3-5 seconds on non-Android commands
+if [[ "$MODE" == "exec" && -n "$EXEC_CMD" ]] && echo "$EXEC_CMD" | grep -qiE 'android|gradle|assembleDebug|installDebug'; then
+  ensure_java_for_android || true  # non-fatal: only Android builds need JDK 22+
+  # Auto-detect Android SDK from Windows path
+  if [[ -z "${ANDROID_HOME:-}" ]]; then
+    for sdk_candidate in /mnt/d/Android/SDK /mnt/c/Android/SDK "$HOME/Android/Sdk"; do
+      if [[ -d "$sdk_candidate/platforms" ]]; then
+        export ANDROID_HOME="$sdk_candidate"
+        log "ANDROID_HOME set to $ANDROID_HOME"
+        break
+      fi
+    done
+  fi
+fi
 
 if (( RAW_STREAM == 1 )); then
   export OPENCLAW_RAW_STREAM=1
